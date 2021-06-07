@@ -46,7 +46,12 @@ class Logger:
     :param interval. Additinal time rotation multipler.
     :param verbose: enable debug logging or not
     :param cache_size: set how many dataprofiles to cache
-    :param segments: define either a list of egment keys or a list of segments tags: [  {"key":<featurename>,"value": <featurevalue>},... ]
+    :param segments:
+        Can be either:
+            - Autosegmentation source, one of ["auto", "local"]
+            - List of tag key value pairs for tracking data segments
+            - List of tag keys for which we will track every value
+            - None, no segments will be used
     :param profile_full_dataset: when segmenting dataset, an option to keep the full unsegmented profile of the dataset.
     :param constraints: static assertions to be applied to streams and summaries.
     """
@@ -63,7 +68,8 @@ class Logger:
                  with_rotation_time: Optional[str] = None,
                  interval: int = 1,
                  cache_size: int = 1,
-                 segments: Optional[Union[List[Segment], List[str]]] = None,
+                 segments: Optional[Union[List[Segment], List[str], str]] =
+                 None,
                  profile_full_dataset: bool = False,
                  constraints: DatasetConstraints = None,
                  ):
@@ -131,7 +137,14 @@ class Logger:
             hashed_seg, None)
         return segment_profile
 
-    def set_segments(self, segments: Union[List[Segment], List[str]]) -> None:
+    def set_segments(self,
+                     segments: Union[List[Segment], List[str], str]) -> None:
+        if segments:
+            if segments == "auto":
+                segments = self._retrieve_local_segments()
+            if segments == "local":
+                segments = self._retrieve_local_segments()
+
         if segments:
             if all(isinstance(elem, str) for elem in segments):
                 self.segment_type = "keys"
@@ -142,6 +155,12 @@ class Logger:
         else:
             self.segments = None
             self.segment_type = None
+
+    def _retrieve_local_segments(self) -> \
+            Optional[Union[List[Segment], List[str], str]]:
+        """Retrieves local segments"""
+
+
 
     def _intialize_profiles(self,
                             dataset_timestamp: Optional[datetime.datetime] = datetime.datetime.now(

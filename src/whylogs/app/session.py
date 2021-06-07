@@ -8,11 +8,13 @@ from uuid import uuid4
 
 import pandas as pd
 
-from whylogs.app.config import SessionConfig, WriterConfig, load_config
+from whylogs.app.config import SessionConfig, WriterConfig, MetadataConfig, \
+    load_config
 from whylogs.app.logger import Logger
 from whylogs.app.writers import Writer, writer_from_config
 from whylogs.core import DatasetProfile
 from whylogs.core.statistics.constraints import DatasetConstraints
+from whylogs.features.autosegmentation import estimate_segments
 
 
 class Session:
@@ -79,7 +81,7 @@ class Session:
         session_timestamp: Optional[datetime.datetime] = None,
         tags: Dict[str, str] = None,
         metadata: Dict[str, str] = None,
-        segments: Optional[Union[List[Dict], List[str]]] = None,
+        segments: Optional[Union[List[Dict], List[str], str]] = None,
         profile_full_dataset: bool = False,
         with_rotation_time: str = None,
         cache_size: int = 1,
@@ -109,8 +111,10 @@ class Session:
             shouldn't need to override this value
         segments:
             Can be either:
-            - List of tag key value pairs for tracking datasetments
-            - List of tag keys for whylogs to split up the data in the backend
+            - Autosegmentation source, one of ["auto", "local"]
+            - List of tag key value pairs for tracking data segments
+            - List of tag keys for which we will track every value
+            - None, no segments will be used
         Returns
         -------
         ylog : whylogs.app.logger.Logger
@@ -170,7 +174,7 @@ class Session:
         session_timestamp: Optional[datetime.datetime] = None,
         tags: Dict[str, str] = None,
         metadata: Dict[str, str] = None,
-        segments: Optional[Union[List[Dict], List[str]]] = None,
+        segments: Optional[Union[List[Dict], List[str], str]] = None,
         profile_full_dataset: bool = False,
         constraints: DatasetConstraints = None,
     ) -> Optional[DatasetProfile]:
@@ -183,9 +187,12 @@ class Session:
         :param session_timestamp: the timestamp for the session. Override the default one
         :param tags: the tags for the profile. Useful when merging
         :param metadata: information about this current profile. Can be discarded when merging
-        :param segments: can be either
-        - a list of tag key value pairs for marking the segment of the data
-        - a list of tag keys to group the data by
+        :param segments:
+            Can be either:
+            - Autosegmentation source, one of ["auto", "local"]
+            - List of tag key value pairs for tracking data segments
+            - List of tag keys for which we will track every value
+            - None, no segments will be used
         :param profile_full_dataset: when segmenting dataset, an option to keep the full unsegmented profile of the dataset
         :return: a dataset profile if the session is active
         """
@@ -281,6 +288,37 @@ class Session:
 
         return profile
 
+    @staticmethod
+    def estimate_segments(
+        df: pd.DataFrame,
+        name: str,
+        target_field: str = None,
+        max_segments: int = 30,
+        dry_run: bool = False,
+    ) -> Optional[Union[List[Dict], List[str]]]:
+        """
+        Estimates the most important features and values on which to segment
+        data profiling using entropy-based methods.
+
+        :param df: the dataframe of data to profile
+        :param name: name for discovery in the logger, automatically applied
+        to loggers with same dataset_name
+        :param target_field: target field (optional)
+        :param max_segments: upper threshold for total combinations of segments,
+        default 30
+        :param dry_run: run calculation but do not write results to metadata
+        :return: a list of segmentation feature names
+        """
+        segments = estimate_segments(
+                df=df,
+                target_field=target_field,
+                max_segments=max_segments
+        )
+
+        print(segments)
+
+        return segments
+
     def close(self):
         """
         Deactivate this session and flush all associated loggers
@@ -323,7 +361,11 @@ def session_from_config(config: SessionConfig) -> Session:
     Construct a whylogs session from a `SessionConfig`
     """
     writers = list(map(lambda x: writer_from_config(x), config.writers))
-    return Session(config.project, config.pipeline, writers, config.verbose, config.with_rotation_time, config.cache_size)
+    return Session(config.project,
+                   config.pipeline,
+                   writers,
+                   config.metadata_writer,
+                   config.verbose, config.with_rotation_time, config.cache_size)
 
 
 #: A global session
@@ -340,8 +382,12 @@ def reset_default_session():
     config: SessionConfig = load_config()
     if config is None:
         config = SessionConfig(
-            "default-project", "default-pipeline", [WriterConfig(
-                type="local", output_path="output", formats=["all"])], False
+                "default-project",
+                "default-pipeline",
+                [WriterConfig(type="local", output_path="output",
+                              formats=["all"])],
+                MetadataConfig(type="local", output_path="output"),
+                False
         )
     _session = session_from_config(config)
 
@@ -368,10 +414,13 @@ def get_or_create_session(path_to_config: Optional[str] = None):
         config = load_config(path_to_config)
         if config is None:
             print("WARN: Missing config")
-            writer = WriterConfig(
-                type="local", output_path="output", formats=["all"])
             config = SessionConfig(
-                "default-project", "default-pipeline", [writer], False
+                    "default-project",
+                    "default-pipeline",
+                    [WriterConfig(type="local", output_path="output",
+                                  formats=["all"])],
+                    MetadataConfig(type="local", output_path="output"),
+                    False
             )
         _session = session_from_config(config)
     return _session
