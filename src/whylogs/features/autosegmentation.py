@@ -4,54 +4,73 @@ import pandas as pd
 import numpy as np
 
 
-def _entropy(df, column_name, target_column_name=None):
+def _entropy(df: Union[pd.DataFrame],
+             current_split_columns: List[Optional[str]],
+             column_name: str,
+             target_column_name : str = None,
+             normalized: bool = False):
     """Entropy calculation"""
-    probs = df[column_name].value_counts(normalize=True, dropna=False)
-    return -np.sum([p_i * np.log(p_i) for p_i in probs])
+    total_entropy = 0
+
+    col_groups = df.groupby(current_split_columns)
+    for col_value, col_group in col_groups:
+        probs = col_group[column_name].value_counts(normalize=True,
+                                                    dropna=False)
+        entropy = -np.sum([p_i * np.log(p_i) for p_i in probs])
+        if normalized:
+            entropy /= np.log(len(col_group[column_name].unique()))
+
+        total_entropy += entropy
+
+    return total_entropy
 
 
-def _normalized_entropy(df, column_name, target_column_name=None):
-    """Normalized entropy calculation that mitigates bias toward high cardinality variables"""
-    return _entropy(df, column_name, target_column_name=None) / np.log(
-            len(df[column_name].unique()))
+def _information_gain_ratio(df: pd.DataFrame,
+                            current_split_columns: List[Optional[str]],
+                            column_name: str,
+                            target_column_name: str,
+                            normalized: bool = False):
+    """Information gain ratio"""
+    ratios = []
 
-
-def _information_gain_ratio(df, column_name, target_column_name):
-    """Information gain ratio """
     n_rows = df.shape[0]
 
     col_entropy = 0
     split_entropy = 0
-    col_groups = df[[target_column_name, column_name]].groupby(
-            target_column_name, dropna=False)
+    col_groups = df.groupby(current_split_columns)
+
     for col_value, col_group in col_groups:
         col_probs = col_group.value_counts() / n_rows
         col_entropy += col_probs.sum() * -np.sum(
                 [p_i * np.log(p_i) for p_i in col_probs])
 
         # For gain ratio, we must divide by entropy of ratio of |S_v| / |S|
-        split_entropy += len(col_group) / n_rows * np.log(
-                len(col_group) / n_rows)
+        split_entropy += len(col_group) / n_rows * \
+                np.log(len(col_group) / n_rows)
 
-    return -(_entropy(df, target_column_name) - col_entropy) / split_entropy
+    ratios.append(-(_entropy(df, target_column_name) -
+                    col_entropy) / split_entropy)
+
+    assert len(ratios) == len
+    return ratios
 
 
-def _find_best_split(df, column_names, target_column_name=None):
-    if target_column_name == None:
-        score_fn = _normalized_entropy
-    elif target_column_name in df.columns:
-        if target_column_name in column_names:
-            column_names.remove(target_column_name)
-        score_fn = _information_gain_ratio
+def _find_best_split(df: pd.DataFrame,
+                     current_split_columns: List[Optional[str]],
+                     valid_column_names: Union[str],
+                     target_column_name: Optional[str] = None):
+    if target_column_name is None:
+        score_fn = _entropy
     else:
-        print(f"\nIncorrect target_field parameter: {target_column_name}")
+        score_fn = _information_gain_ratio
 
     max_score_tuple = 0, None
-    for column_name in column_names:
+    for column_name in valid_column_names:
         value = score_fn(df, column_name, target_column_name)
         if value > max_score_tuple[0]:
             max_score_tuple = value, column_name
 
+    print(f"result from _find_best_split: {max_score_tuple}")
     return max_score_tuple
 
 
@@ -87,12 +106,18 @@ def estimate_segments(
                     null_perc <= 0.2):
                 valid_column_names.append(col)
 
-        if not valid_column_names:
-            if not segments:
-                print("\nFound zero valid columns.")
+        if target_field in valid_column_names:
+            valid_column_names.remove(target_field)
 
-        _, segment_column_name = _find_best_split(df, valid_column_names,
-                                                  target_column_name=target_field)
+        if not valid_column_names and not segments:
+            print("\nFound zero valid columns.")
+
+        _, segment_column_name = _find_best_split(
+                df,
+                [target_field],
+                valid_column_names,
+                target_column_name=target_field
+        )
         segments.append(segment_column_name)
         segments_used *= len(df[segment_column_name].unique())
 

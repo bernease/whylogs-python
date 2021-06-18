@@ -14,6 +14,7 @@ from whylogs.app.config import SessionConfig, WriterConfig, MetadataConfig, \
     load_config
 from whylogs.app.logger import Logger, Segment
 from whylogs.app.writers import WhyLabsWriter, Writer, writer_from_config
+from whylogs.app.metadata_writer import MetadataWriter
 from whylogs.core import DatasetProfile
 from whylogs.core.statistics.constraints import DatasetConstraints
 from whylogs.features.autosegmentation import estimate_segments
@@ -84,6 +85,7 @@ class Session:
         project: str,
         pipeline: str,
         writers: List[Writer],
+        metadata: MetadataWriter,
         verbose: bool = False,
         with_rotation_time: str = None,
         cache_size: int = None,
@@ -95,12 +97,14 @@ class Session:
         self.project = project
         self.pipeline = pipeline
         self.writers = writers
+        self.metadata = metadata
         self.verbose = verbose
         self._active = True
         self._loggers = {}
         self._session_time = datetime.datetime.now()
         self._session_id = str(uuid4())
-        self._config = SessionConfig(project, pipeline, writers, verbose)
+        self._config = SessionConfig(project, pipeline, writers,
+                                     metadata, verbose)
         self.with_rotation_time = with_rotation_time
         self.cache_size = cache_size
         self.report_progress = report_progress
@@ -329,8 +333,8 @@ class Session:
 
         return profile
 
-    @staticmethod
     def estimate_segments(
+        self,
         df: pd.DataFrame,
         name: str,
         target_field: str = None,
@@ -356,7 +360,8 @@ class Session:
                 max_segments=max_segments
         )
 
-        print(segments)
+        if not dry_run:
+            self.metadata.autosegmentation_write(name, segments)
 
         return segments
 
@@ -418,7 +423,7 @@ def session_from_config(config: SessionConfig) -> Session:
         config.project,
         config.pipeline,
         writers,
-        config.metadata_writer,
+        config.metadata,
         config.verbose,
         config.with_rotation_time,
         config.cache_size,

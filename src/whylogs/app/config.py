@@ -189,6 +189,8 @@ class SessionConfig:
         Name of the associated data pipeline
     writers : list
         A list of `WriterConfig` objects defining writer outputs
+    metadata : MetadataConfig
+        A MetadataConfiguration object. If none, will replace with default.
     verbose : bool, default=False
         Output verbosity
     with_rotation_time: str, default = None, to rotate profiles with time, takes values of overall rotation interval,
@@ -205,7 +207,7 @@ class SessionConfig:
             project: str,
             pipeline: str,
             writers: List[WriterConfig],
-            metadata: MetadataConfig,
+            metadata: Optional[MetadataConfig] = False,
             verbose: bool = False,
             with_rotation_time: str = None,
             cache_size: int = 1,
@@ -215,6 +217,8 @@ class SessionConfig:
         self.pipeline = pipeline
         self.verbose = verbose
         self.writers = writers
+        if not metadata:
+            metadata = MetadataConfig(type="local", output_path="output")
         self.metadata = metadata
         self.with_rotation_time = with_rotation_time
         self.cache_size = cache_size
@@ -276,8 +280,8 @@ class MetadataConfigSchema(Schema):
     Marshmallow schema for :class:`MetadataConfig` class.
     """
 
-    type = fields.Str(validate=validate.OneOf(["local", "s3"]), required=True)
-    output_path = fields.Str(required=True)
+    type = fields.Str(validate=validate.OneOf(["local", "s3"]), required=False)
+    output_path = fields.Str(required=False)
     path_template = fields.Str(required=False, allow_none=True)
 
     @post_load
@@ -300,10 +304,11 @@ class SessionConfigSchema(Schema):
         validate=validate.Length(min=1),
         required=True,
     )
-    metadata = fields.Nested(MetadataConfigSchema, required=True)
+    metadata = fields.Nested(MetadataConfigSchema, required=False)
 
     @post_load
     def make_session(self, data, **kwargs):
+        print(f"config.py, line 311, data: {data}")
         return SessionConfig(**data)
 
 
